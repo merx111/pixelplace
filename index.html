@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>p/Place</title>
+  <style>
+    body {
+      margin: 0;
+      background: #111;
+      color: white;
+      font-family: Arial, sans-serif;
+      overflow: hidden;
+    }
+    header {
+      position: fixed;
+      top: 10px;
+      left: 10px;
+      z-index: 10;
+    }
+    #loginForm, #registerForm {
+      background: rgba(0,0,0,0.8);
+      padding: 10px;
+      margin: 5px 0;
+      border-radius: 5px;
+    }
+    #canvasWrapper {
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      cursor: grab;
+    }
+    canvas {
+      background: #eee;
+      display: block;
+      margin: auto;
+      image-rendering: pixelated;
+    }
+    #paintBtn {
+      position: fixed;
+      bottom: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 10px 20px;
+      font-size: 16px;
+      cursor: pointer;
+    }
+    #colorMenu {
+      position: fixed;
+      bottom: 60px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 5px;
+      overflow-x: auto;
+      background: rgba(0,0,0,0.8);
+      padding: 10px;
+      border-radius: 10px;
+      display: none;
+    }
+    .color {
+      width: 30px;
+      height: 30px;
+      border: 2px solid white;
+      cursor: pointer;
+    }
+    #status {
+      position: fixed;
+      bottom: 10px;
+      right: 10px;
+      background: rgba(0,0,0,0.8);
+      padding: 10px;
+      border-radius: 5px;
+    }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/backendless"></script>
+</head>
+<body>
+  <header>
+    <div id="auth">
+      <div id="loginForm">
+        <h3>Login</h3>
+        <input id="loginEmail" type="email" placeholder="Email"><br>
+        <input id="loginPass" type="password" placeholder="Password"><br>
+        <button onclick="login()">Entrar</button>
+      </div>
+      <div id="registerForm">
+        <h3>Register</h3>
+        <input id="regEmail" type="email" placeholder="Email"><br>
+        <input id="regPass" type="password" placeholder="Password"><br>
+        <button onclick="register()">Registrarse</button>
+      </div>
+    </div>
+    <div id="userInfo" style="display:none;">
+      <span id="userEmail"></span>
+      <button onclick="logout()">Salir</button>
+    </div>
+  </header>
+
+  <div id="canvasWrapper">
+    <canvas id="board" width="500" height="500"></canvas>
+  </div>
+
+  <button id="paintBtn" onclick="toggleColorMenu()">🎨 Pintar</button>
+  <div id="colorMenu"></div>
+
+  <div id="status">Pixels usados: <span id="usedCount">0</span><br>Cooldown: <span id="cooldown">0</span>s</div>
+
+  <script>
+    // Backendless config
+    const APP_ID = "AE2868DE-3141-4DCE-9DF3-C5B4D9874172";
+    const API_KEY = "C5975630-CB3D-4C04-8AA9-782F157DFC4F";
+    Backendless.initApp(APP_ID, API_KEY);
+
+    let currentUser = null;
+    let ctx = board.getContext("2d");
+    let scale = 10; // tamaño pixel
+    let offsetX = 0, offsetY = 0;
+    let isDragging = false, startX, startY;
+    let selectedColor = "#000000";
+    let pixelUsed = 0;
+    let cooldown = 0;
+
+    const colors = ["#FF0000","#00FF00","#0000FF","#FFFF00","#FF00FF","#00FFFF","#000000","#FFFFFF"];
+    const colorMenu = document.getElementById("colorMenu");
+    colors.forEach(c=>{
+      let div=document.createElement("div");
+      div.className="color";
+      div.style.background=c;
+      div.onclick=()=>{selectedColor=c;};
+      colorMenu.appendChild(div);
+    });
+
+    // Login/Register
+    async function login(){
+      let email=document.getElementById("loginEmail").value;
+      let pass=document.getElementById("loginPass").value;
+      try{
+        currentUser=await Backendless.UserService.login(email,pass,true);
+        showUser();
+      }catch(e){alert(e.message);}
+    }
+    async function register(){
+      let email=document.getElementById("regEmail").value;
+      let pass=document.getElementById("regPass").value;
+      let user=new Backendless.User();
+      user.email=email; user.password=pass;
+      try{
+        await Backendless.UserService.register(user);
+        alert("Usuario creado, ahora loguea.");
+      }catch(e){alert(e.message);}
+    }
+    async function logout(){
+      await Backendless.UserService.logout();
+      currentUser=null;
+      document.getElementById("auth").style.display="block";
+      document.getElementById("userInfo").style.display="none";
+    }
+    function showUser(){
+      document.getElementById("auth").style.display="none";
+      document.getElementById("userInfo").style.display="block";
+      document.getElementById("userEmail").innerText=currentUser.email;
+    }
+
+    // Pintar pixel
+    board.addEventListener("click", async e=>{
+      if(!currentUser){alert("Inicia sesión.");return;}
+      if(cooldown>0){alert("Cooldown activo.");return;}
+
+      let rect=board.getBoundingClientRect();
+      let x=Math.floor((e.clientX-rect.left-offsetX)/scale);
+      let y=Math.floor((e.clientY-rect.top-offsetY)/scale);
+
+      ctx.fillStyle=selectedColor;
+      ctx.fillRect(x*scale+offsetX,y*scale+offsetY,scale,scale);
+
+      await Backendless.Data.of("Pixels").save({x,y,color:selectedColor,userId:currentUser.objectId});
+      
+      pixelUsed++;
+      document.getElementById("usedCount").innerText=pixelUsed;
+      
+      if(pixelUsed%20===0){
+        cooldown=30;
+      }
+    });
+
+    // cooldown timer
+    setInterval(()=>{
+      if(cooldown>0) cooldown--;
+      document.getElementById("cooldown").innerText=cooldown;
+    },1000);
+
+    // Pan & zoom
+    board.addEventListener("mousedown", e=>{
+      isDragging=true; startX=e.clientX-offsetX; startY=e.clientY-offsetY;
+      board.style.cursor="grabbing";
+    });
+    board.addEventListener("mousemove", e=>{
+      if(isDragging){offsetX=e.clientX-startX; offsetY=e.clientY-startY; drawPixels();}
+    });
+    board.addEventListener("mouseup", ()=>{isDragging=false; board.style.cursor="grab";});
+    board.addEventListener("wheel", e=>{
+      e.preventDefault();
+      scale+= e.deltaY<0 ? 1 : -1;
+      if(scale<2) scale=2;
+      drawPixels();
+    });
+
+    // Load pixels from DB
+    async function loadPixels(){
+      let pixels=await Backendless.Data.of("Pixels").find();
+      pixels.forEach(p=>{
+        ctx.fillStyle=p.color;
+        ctx.fillRect(p.x*scale+offsetX,p.y*scale+offsetY,scale,scale);
+      });
+    }
+
+    function drawPixels(){
+      ctx.clearRect(0,0,board.width,board.height);
+      loadPixels();
+    }
+    loadPixels();
+
+    function toggleColorMenu(){
+      colorMenu.style.display=colorMenu.style.display==="none"?"flex":"none";
+    }
+  </script>
+</body>
+</html>
